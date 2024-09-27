@@ -1,22 +1,49 @@
 section .data
-  welcome db "HTTP server starting...", 0, 10
+  welcome db "Welcome", 0, 10
   welcome_size equ $-welcome 
 
 section .text
   global _start
 
-print_welcome:
-  mov rax, 1
-  mov rdi, 1
-  mov rsi, welcome
-  mov rdx, welcome_size
+; make calling functions easier
+%macro fncall 2
+  mov rdi, %2
+  call %1
+%endmacro
+
+%macro fncall2 3
+  mov rdi, %2
+  mov rsi, %3
+  call %1
+%endmacro
+
+%macro fncall3 4
+  mov rdi, %2
+  mov rsi, %3
+  mov rdx, %4
+  call %1
+%endmacro
+; end macros
+
+read:
+  mov rax, 0
   syscall
+  ret
+
+write:
+  mov rax, 1
+  syscall
+  ret
+
+close:
+  mov rax, 3
+  syscall
+  ret
 
 exit:
   mov rax, 60
-  mov rdi, 0
   syscall
 
 _start:
-  call print_welcome
-  jmp exit
+  fncall3 write, 1, welcome, welcome_size
+  fncall exit, 0
