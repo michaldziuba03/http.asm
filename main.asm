@@ -1,7 +1,12 @@
 section .data
-  welcome db "Welcome", 0, 10
+  welcome db "HTTP server starting...", 0, 10
   welcome_size equ $-welcome
   port dw 5000
+  res db "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\nHello"
+  res_size equ $-res
+  failure db "Critial error. Exiting...", 0, 10
+  failure_size equ $-failure
+  server_fd dd 0
 
 section .text
   global _start
@@ -26,9 +31,16 @@ section .text
 %endmacro
 ; end macros
 
+; CONST values
 AF_INET equ 2
 SOCK_STREAM equ 1
+EXIT_FAILURE equ 1
+EXIT_SUCCESS equ 0
+STDOUT equ 1
+STDIN equ 0
+; end CONST values
 
+; syscalls
 read:
   mov rax, 0
   syscall
@@ -69,7 +81,12 @@ accept:
   syscall
   ret
 
-; in it would be: (port << 8) | (port >> 8)
+; util functions
+die:
+  fncall3 write, 1, failure, failure_size
+  fncall exit, EXIT_FAILURE
+
+; (port << 8) | (port >> 8)
 htons:
   mov ax, [port]
   mov di, ax
@@ -78,7 +95,14 @@ htons:
   or ax, di
   ret
 
+busy_sleep:
+  jmp busy_sleep
 
 _start:
-  fncall3 write, 1, welcome, welcome_size
-  fncall exit, 0
+  fncall3 write, STDOUT, welcome, welcome_size
+  fncall3 socket, AF_INET, SOCK_STREAM, 0
+  cmp eax, 0
+  je die
+  mov [server_fd], eax
+  call busy_sleep
+  fncall exit, EXIT_SUCCESS

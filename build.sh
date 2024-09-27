@@ -1,5 +1,4 @@
 #!/bin/sh
-
 on_build() {
   if [ "$1" = "run" ]; then
     ./build/main

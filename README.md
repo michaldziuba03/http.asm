@@ -16,6 +16,3 @@ chmod +x build.sh
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
-
-0000 0000 1000 0000
-1000 0000 0000 0000
