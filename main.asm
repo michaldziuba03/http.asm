@@ -1,6 +1,7 @@
 section .data
   welcome db "Welcome", 0, 10
-  welcome_size equ $-welcome 
+  welcome_size equ $-welcome
+  port dw 5000
 
 section .text
   global _start
@@ -24,6 +25,9 @@ section .text
   call %1
 %endmacro
 ; end macros
+
+AF_INET equ 2
+SOCK_STREAM equ 1
 
 read:
   mov rax, 0
@@ -64,6 +68,16 @@ accept:
   mov rax, 43
   syscall
   ret
+
+; in it would be: (port << 8) | (port >> 8)
+htons:
+  mov ax, [port]
+  mov di, ax
+  shr di, 8
+  shl ax, 8
+  or ax, di
+  ret
+
 
 _start:
   fncall3 write, 1, welcome, welcome_size
