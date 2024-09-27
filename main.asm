@@ -34,6 +34,7 @@ section .text
 ; CONST values
 AF_INET equ 2
 SOCK_STREAM equ 1
+INADDR_ANY equ 0x00000000
 EXIT_FAILURE equ 1
 EXIT_SUCCESS equ 0
 STDOUT equ 1
@@ -100,9 +101,28 @@ busy_sleep:
 
 _start:
   fncall3 write, STDOUT, welcome, welcome_size
+  ; create server socket
   fncall3 socket, AF_INET, SOCK_STREAM, 0
   cmp eax, 0
   je die
   mov [server_fd], eax
+
+  ; prepare sockaddr_in (sizeof == 16) on the stack
+  sub rsp, 16
+  mov word [rsp], AF_INET
+  call htons
+  mov word [rsp+2], ax
+  mov dword [rsp+4], INADDR_ANY
+  mov qword [rsp+8], 0
+
+  ; bind socket to address 
+  fncall3 bind, [server_fd], rsp, 16
+  cmp eax, 0
+  jl die
+
+  fncall2 listen, [server_fd], 10
+  cmp eax, 0
+  jl die
+
   call busy_sleep
   fncall exit, EXIT_SUCCESS
