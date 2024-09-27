@@ -56,6 +56,10 @@ EXIT_FAILURE equ 1
 EXIT_SUCCESS equ 0
 STDOUT equ 1
 STDIN equ 0
+
+F_GETFL equ 3
+F_SETFL equ 4
+O_NONBLOCK equ 0x800
 ; end CONST values
 
 ; syscalls
@@ -102,6 +106,25 @@ listen:
 accept:
   mov rax, 43
   syscall
+  ret
+
+fcntl:
+  mov rax, 72
+  syscall
+  ret
+
+; first step for nonblocking implemenation
+set_nonblocking:
+  mov r9, rdi
+
+  fncall3 fcntl, r9, F_GETFL, 0
+  cmp rax, -1
+  je die
+
+  or rax, O_NONBLOCK
+  fncall3 fcntl, r9, F_SETFL, rax
+  cmp rax, -1
+  je die
   ret
 
 ; util functions
