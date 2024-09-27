@@ -6,7 +6,6 @@ Website written in assembly
 
 ```sh
 chmod +x run.sh
-
 ./run.sh
 ```
 
