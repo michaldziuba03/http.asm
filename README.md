@@ -1,6 +1,6 @@
 # http.asm
 
-Simple HTTP server written in assembly for x84_64 architecture and Linux.
+Simple HTTP server written in assembly for x86_64 architecture and Linux.
 
 ## Running
 
@@ -12,6 +12,8 @@ chmod +x build.sh
 # if you just want to build:
 ./build.sh
 ```
+
+> For now it's blocking server, but maybe I will improve it and add `epoll`.
 
 ## License
 
