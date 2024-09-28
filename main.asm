@@ -11,11 +11,39 @@ section .data
   failure db "Critial error. Exiting...", 0x0, 0X0A
   failure_size equ $-failure
   server_fd dd 0
+  epoll_fd dd 0
   conn_log db "Got connection", 0x0A
   conn_log_size equ $-conn_log
+  alive db "ALIVE", 0x0A
+  alive_size equ $-alive
 
 section .text
   global _start
+
+AF_INET equ 2
+SOCK_STREAM equ 1
+INADDR_ANY equ 0x00000000
+SOL_SOCKET equ 1
+SO_REUSEADDR equ 2
+
+EXIT_FAILURE equ 1
+EXIT_SUCCESS equ 0
+
+STDOUT equ 1
+STDIN equ 0
+
+F_GETFL equ 3
+F_SETFL equ 4
+O_NONBLOCK equ 0x800
+
+MAX_EVENTS equ 512
+EPOLL_CTL_ADD equ 1
+EPOLLIN equ 0x001
+EPOLLOUT equ 0x004
+EPOLLHUP equ 0x010
+EPOLLRDHUP equ 0x2000
+EPOLLERR equ 0x008
+EPOLLET equ -0x80000000
 
 ; make calling functions easier
 %macro fncall 2
@@ -36,6 +64,14 @@ section .text
   call %1
 %endmacro
 
+%macro fncall4 5
+  mov rdi, %2
+  mov rsi, %3
+  mov rdx, %4
+  mov r10, %5
+  call %1
+%endmacro
+
 %macro fncall5 6
   mov rdi, %2
   mov rsi, %3
@@ -46,22 +82,6 @@ section .text
 %endmacro
 ; end macros
 
-; CONST values
-AF_INET equ 2
-SOCK_STREAM equ 1
-INADDR_ANY equ 0x00000000
-SOL_SOCKET equ 1
-SO_REUSEADDR equ 2
-EXIT_FAILURE equ 1
-EXIT_SUCCESS equ 0
-STDOUT equ 1
-STDIN equ 0
-
-F_GETFL equ 3
-F_SETFL equ 4
-O_NONBLOCK equ 0x800
-; end CONST values
-
 ; syscalls
 read:
   mov rax, 0
@@ -71,6 +91,10 @@ read:
 write:
   mov rax, 1
   syscall
+  ret
+
+alivez:
+  fncall3 write, STDOUT, alive, alive_size
   ret
 
 close:
@@ -113,24 +137,21 @@ fcntl:
   syscall
   ret
 
-; first step for nonblocking implemenation
-set_nonblocking:
-  mov r9, rdi
-
-  fncall3 fcntl, r9, F_GETFL, 0
-  cmp rax, -1
-  je die
-
-  or rax, O_NONBLOCK
-  fncall3 fcntl, r9, F_SETFL, rax
-  cmp rax, -1
-  je die
+epoll_create1:
+  mov rax, 291
+  syscall
   ret
 
-; util functions
-die:
-  fncall3 write, STDOUT, failure, failure_size
-  fncall exit, EXIT_FAILURE
+epoll_wait:
+  mov rax, 232
+  syscall
+  ret
+
+epoll_ctl:
+  mov rax, 233
+  syscall
+  ret
+
 
 ; (port << 8) | (port >> 8)
 htons:
@@ -141,31 +162,88 @@ htons:
   or ax, di
   ret
 
-; handle each connection
-listener:
+die:
+  fncall3 write, STDOUT, failure, failure_size
+  fncall exit, EXIT_FAILURE
+
+set_nonblocking:
+  mov r9, rdi
+
+  fncall3 fcntl, r9, F_GETFL, 0
+  cmp rax, -1
+  je die
+
+  or eax, O_NONBLOCK
+  fncall3 fcntl, r9, F_SETFL, rax
+  cmp rax, -1
+  je die
+  ret
+
+handle_accept:
   sub rsp, 24 ; alloc 16 bytes for address and 8 bytes for pointer to size
   mov rax, 16
   mov qword [rsp+16], rax
   lea rdx, [rsp+16]
-  ; accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+
   fncall3 accept, [server_fd], rsp, rdx
-  cmp eax, 0
-  jl die
+  cmp eax, -1
+  je die
+  add rsp, 24
 
-  add rsp, 24 ; free stack
-  mov rdi, rax ; save accepted socket descriptor
+  mov r9, rax
+  ; make accepted socket nonblocking
+  fncall set_nonblocking, r9
 
-  sub rsp, 1024
-  fncall3 read, rdi, rsp, 1024
-  add rsp, 1024 ; free stack, I do not care about data
-
-  fncall3 write, rdi, res, res_size
-  fncall close, rdi
+  sub rsp, 16
+  mov eax, EPOLLIN
+  mov dword [rsp], eax
+  mov dword [rsp+8], r9d
+  fncall4 epoll_ctl, [epoll_fd], EPOLL_CTL_ADD, r9, rsp
+  add rsp, 16
 
   fncall3 write, STDOUT, conn_log, conn_log_size
 
-  jmp listener
+  jmp finish_poll
 
+handle_request:
+  mov r9, rdi
+  sub rsp, 1024
+  fncall3 read, r9, rsp, 1024
+  add rsp, 1024 ; free stack, I do not care about that data
+
+  fncall3 write, r9, res, res_size
+  fncall close, r9
+  ret
+
+evloop:
+  sub rsp, 16 * MAX_EVENTS
+
+  fncall4 epoll_wait, [epoll_fd], rsp, MAX_EVENTS, -1
+  cmp eax, 0
+  jl die
+
+  mov r15, rax  ; events count
+  mov rbx, 0  ; offset
+  
+poll_loop:
+  mov rax, 16
+  imul rax, rbx
+  
+  ; addressing struct
+  mov rsi, [rsp+rax+8]
+  cmp esi, [server_fd]
+  je handle_accept
+  fncall handle_request, rsi  ; else pass fd
+
+finish_poll:
+  inc rbx
+  dec r15
+  cmp r15, 0
+  jg poll_loop
+
+  add rsp, 16 * MAX_EVENTS
+
+  jmp evloop
 
 _start:
   fncall3 write, STDOUT, welcome, welcome_size
@@ -196,9 +274,31 @@ _start:
   jl die
 
   add rsp, 16 ; free stack
-
+  
   fncall2 listen, [server_fd], 10
   cmp eax, 0
   jl die
 
-  jmp listener
+  fncall set_nonblocking, [server_fd]
+
+  fncall epoll_create1, 0
+  cmp eax, 0
+  jl die
+  mov [epoll_fd], eax
+
+  mov eax, [server_fd]
+  sub rsp, 16
+  mov dword [rsp], EPOLLIN | EPOLLET
+  mov dword [rsp+8], eax
+
+  ; epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev)
+  fncall4 epoll_ctl, [epoll_fd], EPOLL_CTL_ADD, [server_fd], rsp
+  cmp eax, 0
+  jl die
+  add rsp, 16
+
+  call evloop
+
+  fncall close, [server_fd]
+  fncall close, [epoll_fd]
+  fncall exit, EXIT_SUCCESS
